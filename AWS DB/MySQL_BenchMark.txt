@@ -1,0 +1,50 @@
+QueriesNo=$(echo `mysql -u root -pdb15319root -s -N -e "show status like 'Queries'"` | cut -d ' ' -f 2)
+
+Uptime=$(echo `mysql -u root -pdb15319root -s -N -e "show status like 'Uptime'"` | cut -d ' ' -f 2) 
+
+CurrentTPS=$((($QueriesNo-6)/16/$Uptime*100/130))
+
+mon-put-data --namespace "p3" --metric-name TPSWatch --value $CurrentTPS --aws-credential-file ~/CloudWatch-1.0.20.0/credential-file-path.template 
+
+
+cd sysbench-0.5/sysbench/
+
+./sysbench --test=tests/db/oltp.lua --mysql-host=MyLoadBalancer-2139981413.us-east-1.elb.amazonaws.com --mysql-user=sysbench --mysql-password=project3 --oltp-table-size=5000000 --num-threads=16 --max-requests=0 --max-time=500000 --report-interval=5 --oltp-read-only=on run | tee $RUN_NAME.out
+
+
+cd sysbench-0.5/sysbench/
+
+./sysbench --test=tests/db/oltp.lua --mysql-host=ec2-54-85-151-149.compute-1.amazonaws.com --mysql-user=sysbench --mysql-password=project3 --oltp-table-size=5000000 --num-threads=16 --max-requests=0 --max-time=300 --report-interval=5 --oltp-read-only=on run | tee $RUN_NAME.out
+
+
+service mysql stop
+umount /var/lib/mysql
+umount /storage/mountpoint
+
+
+
+#!/bin/sh -e
+
+mount /dev/xvdc /storage/mountpoint
+cp -a /home/mysql_backup/* /storage/mountpoint
+chown mysql:mysql /storage/mountpoint
+service mysql stop
+mount --bind /storage/mountpoint /var/lib/mysql
+service mysql start
+
+
+source ~/.bashrc
+
+until [ 1 = 0 ];
+do
+QueriesNo=$(echo `mysql -u root -pdb15319root -s -N -e "show status like 'Queries'"` | cut -d ' ' -f 2)
+Uptime=$(echo `mysql -u root -pdb15319root -s -N -e "show status like 'Uptime'"` | cut -d ' ' -f 2)
+CurrentTPS=$((($QueriesNo+6)/16/$Uptime*100/130))
+
+mon-put-data --namespace "p3" --metric-name TPSWatch --value $CurrentTPS --aws-credential-file ~/CloudWatch-1.0.20.0/credential-file-path.template AutoScalingGroupName=AddForTPS --unit Percent
+
+mon-put-data --namespace "p4" --metric-name TPSWatch --value 70 --aws-credential-file ~/CloudWatch-1.0.20.0/credential-file-path.template  --unit Percent
+
+sleep 60
+
+done
